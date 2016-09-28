@@ -1,0 +1,46 @@
+    [RoutePrefix("api/signup")]
+    public class SignUpApiController : ApiController
+    {
+        ISignUpService _signUpService;
+
+        public SignUpApiController(ISignUpService signUpService)
+        {
+            _signUpService = signUpService;
+        }
+    
+        [Route("{employeeId:int}/invite"), HttpPost]
+        public async Task<HttpResponseMessage> InviteEmployee(int employeeId)
+        {
+            try
+            {
+                await _signUpService.SendInvitationAsync(employeeId);
+                SuccessResponse sr = new SuccessResponse();
+                return Request.CreateResponse(HttpStatusCode.OK, sr);
+            }
+            catch (Exception ex)
+            {
+                ErrorResponse response = new ErrorResponse(ex.Message);
+                return Request.CreateResponse(HttpStatusCode.InternalServerError, response);
+            }
+        }
+
+        [Route("registerEmployee"), HttpPost]
+        public HttpResponseMessage RegisterEmployee(EmployeeSignUpAddRequest employee)
+        {
+            if (!ModelState.IsValid && employee != null)
+            {
+                return Request.CreateErrorResponse(HttpStatusCode.BadRequest, ModelState);
+            }
+            try
+            {
+                _signUpService.ConfirmEmployeeInvitation(employee);
+                SuccessResponse sr = new SuccessResponse();
+                return Request.CreateResponse(HttpStatusCode.OK, sr);
+            }
+            catch (Exception ex)
+            {
+                ErrorResponse response = new ErrorResponse(ex.Message);
+                return Request.CreateResponse(HttpStatusCode.InternalServerError, response);
+            }
+        }
+    }
