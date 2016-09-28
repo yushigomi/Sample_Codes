@@ -1,0 +1,444 @@
+(function () {
+    angular.module(APPNAME).controller('shiftController', ShiftController);
+    ShiftController.$inject = ['$baseController', '$scope', '$accountsService', '$accountPositionService', '$employeeService', '$shiftPatternService', '$filter']
+    function ShiftController($baseController, $scope, $accountsService, $accountPositionService, $employeeService, $shiftPatternService, $filter) {
+        var vm = this;
+        vm.$scope = $scope;
+        vm.$accountsService = $accountsService;
+        vm.$accountPositionService = $accountPositionService;
+        vm.$employeeService = $employeeService;
+        vm.$shiftPatternService = $shiftPatternService;
+        vm.$filter = $filter;
+        $baseController.merge(vm, $baseController);
+
+        //retrieved account positions, employees, and shift positions from respective services
+        vm.apItems = null;
+        vm.empItems = null;
+        vm.spItems = null;
+
+        //shift
+        vm.item = null;
+        vm.addForm = false;  //boolean used to show or hide add form
+        vm.shiftForm = null;
+        vm.filterForm = false; //boolean used to show or hide the filter drop-downs
+        vm.shifts = []; //product of manipulating vm.rawShifts. Represents what gets shown on the shift list.
+        vm.rawShifts = []; //the array of shifts after an ajax get.
+        vm.events = []; //product of manipulating vm.rawEvents. An array that holds all calendar event objects. CAN NOT MAKE NEW INSTANCE or else
+        //the calendar willnot recognize it. (i.e. don't set a new array as vm.events, somehow edit the original)
+
+        vm.rawEvents = []; //array of event objects after an ajax get
+
+        vm.eventSources = [vm.events]; //An array that holds a single array of events. This is what is used as the ng-model in the calendar
+
+        vm.selectedEmployeeId = []; //array of selected employee Ids from the filter dropdown
+        vm.selectedAccountPositionId = [];
+
+        vm.queuedInserts = [];
+
+        vm.insert = _insert;
+        vm.shiftErrors = false;
+        vm.deleteConfirmationModal = _deleteConfirmationModal;
+        vm.showForm = _showForm;
+        vm.showFilterForm = _showFilterForm;
+        vm.addShiftPattern = _addShiftPattern;
+        vm.filterShifts = _filterShifts;
+        vm.sortCriteria = "startDateLocal"; //sets the initial sorting criteria for the shift list as the date
+
+        vm.notify = vm.$accountsService.getNotifier($scope);
+
+        _render();
+
+        function _render() {
+            vm.$accountPositionService.accountPositionSelectByAccountId(sabio.page.accountId, _getApSuccess, _getApError);
+            vm.$employeeService.getAll(_getEmpSuccess, _getEmpError);
+            vm.$shiftPatternService.shiftPatternGetByAccountId(sabio.page.accountId, _getSpSuccess, _getSpError);
+        }
+        function _getApSuccess(data, status, jqXHR) {
+            vm.notify(function () {
+                vm.apItems = data.items;
+            });
+        }
+        function _getApError(jqXHR, error) {
+            console.error(error);
+        }
+        function _getEmpSuccess(data, status, jqXHR) {
+            vm.notify(function () {
+                vm.empItems = data.items;
+            });
+        }
+        function _getEmpError(jqXHR, error) {
+            console.error(error);
+        }
+        function _getSpSuccess(data, status, jqXHR) {
+            vm.notify(function () {
+                vm.spItems = data.items;
+                if (vm.spItems) {
+                    for (var i = 0; i < vm.spItems.length; i++) {
+                        var duration1 = moment.duration(vm.spItems[i].startTime);
+                        var duration2 = moment.duration(vm.spItems[i].hours, 'h');
+                        var duration3 = duration1.add(duration2);
+                        vm.spItems[i].endTime = moment.utc(duration3.asMilliseconds()).format("HH:mm");
+                    }
+                }
+            });
+        }
+        function _getSpError(jqXHR, error) {
+            console.error(error);
+        }
+
+        //check fullcalendar documentation for more details
+        vm.uiConfig = {
+            calendar: {
+                editable: false,
+                defaultView: 'agendaWeek',
+                header: {
+                    left: 'title',
+                    center: '',
+                    right: 'month agendaWeek agendaDay today prev,next'
+                },
+                nowIndicator: false,
+
+                //makes a new ajax get everytime the view date range changes
+                viewRender: function (view, element) {
+                    vm.$accountsService.shiftGetBySearch(sabio.page.accountId, view.start.format(), view.end.format(), _shiftGetSuccess, _shiftGetError);
+                    console.log("View Changed: ", view.start._d, view.end._d);
+                    sabio.page.viewStart = view.start._d;
+                    sabio.page.viewEnd = view.end._d;
+
+                },
+                eventClick: function (event, element) {
+                    for (var i = 0; i < vm.shifts.length; i++) {
+                        if (vm.shifts[i].id == event.id) {
+                            _showForm(vm.shifts[i]);
+                            return;
+                        }
+                    }
+                }
+            }
+        };
+
+        function _shiftGetSuccess(data, status, jqXHR) {
+            vm.notify(function () {
+                if (data.items != null) {
+                    vm.rawShifts = data.items;
+                    vm.shifts = vm.rawShifts.slice();
+                    //sabio.page.shifts = data.items;
+                } else {
+                    vm.rawShifts.length = 0; //so page doesn't throw an error if the date range doesn't have any shifts yet
+                }
+                _eventConvert(vm.rawShifts);
+                _filterShifts(); //so the filter persists upon date range change
+            });
+        }
+        function _shiftGetError() {
+            console.log("error");
+        }
+
+        //used to convert event objects so that it fits the formatting requirements for the full calendar
+        function _eventConvert(shiftList) {
+            vm.rawEvents.length = 0;
+
+            if (angular.isArray(shiftList)) {
+                for (var i = 0; i < shiftList.length; i++) {
+                    var title = ((shiftList[i].accountPosition != null) ? shiftList[i].accountPosition.code + " " : shiftList[i].accountPositionId)
+                        + ((shiftList[i].employee != null) ? shiftList[i].employee.firstName + " " + shiftList[i].employee.lastName + ": " + shiftList[i].employeeId : "");
+                    var start = moment(shiftList[i].startDateLocal);
+                    var end = moment(start).add(shiftList[i].shiftLength, 'hours');
+                    var id = shiftList[i].id;
+                    var employeeId = shiftList[i].employeeId;
+                    var accountPositionId = shiftList[i].accountPositionId;
+                    vm.rawEvents.push({ title: title, start: start, end: end, id: id, employeeId: employeeId, accountPositionId: accountPositionId });
+                }
+            } else if (angular.isObject(shiftList)) {
+                var title = ((shiftList[i].accountPosition != null) ? shiftList[i].accountPosition.code + " " : shiftList[i].accountPositionId)
+                    + ((shiftList[i].employee != null) ? shiftList[i].employee.firstName + " " + shiftList[i].employee.lastName + ": " + shiftList[i].employeeId : "");
+                var start = moment(shiftList.startDateLocal);
+                var end = moment(start).add(shiftList.shiftLength, 'hours');
+                var id = shiftList[i].id;
+                var employeeId = shiftList[i].employeeId;
+                var accountPositionId = shiftList[i].accountPositionId;
+                vm.rawEvents.push({ title: title, start: start, end: end, id: id, employeeId: employeeId, accountPositionId: accountPositionId });
+            } else if (shiftList == null) {
+                vm.rawEvents.length = 0;;
+            }
+            var temp = $filter('filter')(vm.rawEvents, {});
+            vm.events.length = 0;
+            for (var i = 0; i < temp.length; i++) {
+
+                vm.events.push(temp[i]);
+            };
+            vm.eventSources.splice(0, 1, vm.events);
+
+            //trying
+            _filterShifts();
+        }
+        function _showForm(shift) {
+            if (shift) {
+                vm.addForm = true;
+                vm.item = shift;
+            }
+            else {
+                if (vm.addForm == false) {
+                    vm.addForm = true;
+                } else {
+                    vm.addForm = false;
+                    vm.item = null;
+                    vm.shiftErrors = false;
+                }
+            }
+        }
+        function _showFilterForm() {
+            if (vm.filterForm) {
+                vm.filterForm = false;
+            } else {
+                vm.filterForm = true;
+            }
+        }
+        function _insert() {
+            vm.shiftErrors = true;
+            if (vm.shiftForm.$valid) {
+                var localMoment = moment(vm.item.startDateLocal);
+                vm.item["startDateUtc"] = localMoment._d.toUTCString();
+                if (vm.item.id == null) {
+                    vm.item["accountId"] = sabio.page.accountId;
+
+                    //for new date picker
+                    //vm.item.startDateLocal = localMoment.format('YYYY-MM-DD hh:mm:ss');
+
+                    var data = JSON.stringify(vm.item);
+                    vm.$accountsService.shiftInsert(data, _insertSuccess, _insertError);
+                }
+                else {
+                    var data = JSON.stringify(vm.item);
+                    vm.$accountsService.shiftUpdate(vm.item.id, data, _updateSuccess, _updateError);
+                }
+            }
+        }
+        function _insertSuccess(data) {
+            vm.notify(function () {
+                console.log(data.item);
+                for (var i = 0; i < vm.apItems.length; i++) {
+                    if (vm.apItems[i].id == vm.item.accountPositionId) {
+                        vm.item["accountPosition"] = { "code": vm.apItems[i].code };
+                        break;
+                    }
+                }
+                for (var i = 0; i < vm.empItems.length; i++) {
+                    if (vm.empItems[i].id == vm.item.employeeId) {
+                        vm.item["employee"] = { "firstName": vm.empItems[i].firstName, "lastName": vm.empItems[i].lastName };
+                        break;
+                    }
+                }
+
+                vm.item.startDateLocal = moment(vm.item.startDateLocal).format('M/DD/YYYY hh:mm A');
+                vm.item["id"] = data.item;
+                vm.rawShifts.push(vm.item);
+                vm.shifts = vm.rawShifts.slice();
+                _eventConvert(vm.shifts);
+                vm.addForm = false;
+                vm.item = null;
+                vm.shiftErrors = false;
+            });
+        }
+        function _insertError() {
+            console.log("insert error");
+        }
+
+        function _updateSuccess() {
+            vm.notify(function () {
+                for (var i = 0; i < vm.rawShifts.length; i++) {
+                    if (vm.rawShifts[i].id == vm.item.id) {
+                        vm.rawShifts.splice(i, 1, vm.item);
+                        break;
+                    }
+                };
+                vm.shifts = vm.rawShifts.slice();
+                console.log("edit success");
+                _eventConvert(vm.shifts);
+                vm.addForm = false;
+                vm.item = null;
+                vm.shiftErrors = false;
+            });
+        }
+        function _updateError() {
+            console.log("edit error");
+        }
+        function _deleteConfirmationModal(obj) {
+            sabio.page.obj = obj;
+            swal({
+                title: "Are you sure?",
+                text: "Shift will be deleted",
+                type: "warning",
+                showCancelButton: true,
+                confirmButtonColor: "#DD6B55",
+                confirmButtonText: "Yes, delete it!",
+                closeOnConfirm: false
+            },
+                function (isConfirm) {
+                    if (isConfirm) {
+                        _deleteShift(sabio.page.obj);
+                        swal({
+                            title: "Deleted!",
+                            text: "Your company has been deleted.",
+                            type: "success",
+                            showCancelButton: false,
+                            //confirmButtonColor: "#DD6B55",
+                            confirmButtonText: "Ok",
+                            closeOnConfirm: true,
+                        }, function () {
+                            vm.notify(function () {
+                                vm.addForm = false;
+                                vm.item = null;
+                                vm.shiftErrors = false;
+                            });
+                        });
+                        //swal("Deleted!", "Your imaginary file has been deleted.", "success");
+                    } else {
+                        swal("Cancelled", "Your file is safe :)", "error");
+                    }
+                });
+        }
+
+        function _deleteShift(shift) {
+            vm.$accountsService.shiftDelete(shift.id, _shiftDeleteSuccess(shift), _shiftDeleteError);
+        }
+        function _shiftDeleteSuccess(shift) {
+            vm.notify(function () {
+                for (var i = 0; i < vm.rawShifts.length; i++) {
+                    if (vm.rawShifts[i].id == sabio.page.obj.id) {
+                        vm.rawShifts.splice(i, 1);
+                        break;
+                    }
+                };
+                vm.shifts = vm.rawShifts.slice();
+                for (var i = 0; i < vm.eventSources[0].length; i++) {
+                    if (vm.eventSources[0][i].id == shift.id) {
+                        vm.eventSources[0].splice(i, 1);
+                        break;
+                    }
+                };
+                console.log("delete success");
+            });
+        }
+        function _shiftDeleteError() {
+            console.log("delete error");
+        }
+
+
+        function _addShiftPattern(shiftPattern) {
+            if (shiftPattern.isMonday) {
+                _convertPattern(1, shiftPattern);
+            }
+            if (shiftPattern.isTuesday) {
+                _convertPattern(2, shiftPattern);
+            }
+            if (shiftPattern.isWednesday) {
+                _convertPattern(3, shiftPattern);
+            }
+            if (shiftPattern.isThursday) {
+                _convertPattern(4, shiftPattern);
+            }
+            if (shiftPattern.isFriday) {
+                _convertPattern(5, shiftPattern);
+            }
+            if (shiftPattern.isSaturday) {
+                _convertPattern(6, shiftPattern);
+            }
+            if (shiftPattern.isSunday) {
+                _convertPattern(0, shiftPattern);
+            }
+            _insertNext();
+        }
+
+        function _convertPattern(dow, shiftPattern) {
+
+            var start = moment(sabio.page.viewStart).add(dow, 'days').add(moment.duration(shiftPattern.startTime));
+            var end = moment(start).add(shiftPattern.hours, 'hours');
+            var offset = (sabio.page.viewStart.getTimezoneOffset()) / 60;
+            var newStart = start.add(offset, 'hours');
+            var newEnd = moment(newStart).add(shiftPattern.hours, 'hours');
+
+
+            vm.item = {};
+            vm.item["accountId"] = sabio.page.accountId;
+            vm.item["accountPositionId"] = shiftPattern.accountPositionId;
+            vm.item["startDateLocal"] = newStart._d.toLocaleString();
+            vm.item["startDateUtc"] = start._d.toUTCString();
+            vm.item["shiftLength"] = shiftPattern.hours;
+            vm.item["employeeId"] = "";
+            var data = JSON.stringify(vm.item);
+            vm.queuedInserts.push(data);
+
+
+        }
+
+        function _insertNext() {
+            if (vm.queuedInserts.length == 0) {
+                return;
+            }
+            vm.$accountsService.shiftInsert(vm.queuedInserts[0], _patternInsertSuccess, _patternInsertError);
+        }
+
+        function _patternInsertSuccess(data) {
+            vm.notify(function () {
+                console.log(data.item);
+                var qi = JSON.parse(vm.queuedInserts[0]);
+                for (var i = 0; i < vm.apItems.length; i++) {
+                    if (vm.apItems[i].id == qi.accountPositionId) {
+                        qi["accountPosition"] = { "code": vm.apItems[i].code };
+                        break;
+                    }
+                }
+                for (var i = 0; i < vm.empItems.length; i++) {
+                    if (vm.empItems[i].id == qi.employeeId) {
+                        qi["employee"] = { "firstName": vm.empItems[i].firstName, "lastName": vm.empItems[i].lastName };
+                        break;
+                    }
+                }
+
+                qi.startDateLocal = moment(qi.startDateLocal).format('M/DD/YYYY hh:mm A');
+                qi["id"] = data.item;
+                vm.rawShifts.push(qi);
+                vm.shifts = vm.rawShifts.slice();
+                _eventConvert(vm.shifts);
+                vm.addForm = false;
+                vm.item = null;
+                vm.shiftErrors = false;
+
+                vm.queuedInserts.splice(0, 1);
+                _insertNext();
+            });
+        }
+        function _patternInsertError() {
+            console.log("shift pattern insert error");
+        }
+
+        //returns true if event object matches filter criteria
+        function _filterBySelection(shift, index, shifts) {
+            var employeeOk = true;
+            if (vm.selectedEmployeeId.length > 0) {
+                employeeOk = vm.selectedEmployeeId.indexOf(shift.employeeId) > -1
+            }
+            var accountPositionOk = true;
+            if (vm.selectedAccountPositionId.length > 0) {
+                accountPositionOk = vm.selectedAccountPositionId.indexOf(shift.accountPositionId) > -1
+            }
+            return accountPositionOk && employeeOk;
+        }
+
+        function _filterShifts() {
+            var filteredEventSources = $filter('filter')(vm.rawEvents, _filterBySelection);
+            var filteredShiftLists = $filter('filter')(vm.rawShifts, _filterBySelection);
+            vm.events.length = 0;
+            vm.shifts.length = 0;
+            for (var i = 0; i < filteredShiftLists.length; i++) {
+                vm.shifts.push(filteredShiftLists[i]);
+            }
+            for (var i = 0; i < filteredEventSources.length; i++) {
+                vm.events.push(filteredEventSources[i]);
+            }
+            vm.eventSources = [vm.events];
+        };
+
+    }
+})();
