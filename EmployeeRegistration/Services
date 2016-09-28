@@ -1,0 +1,65 @@
+        public async Task SendInvitationAsync(int employeeId)
+        {
+            EmployeeRegisterInfo employee = SelectByTenantId(employeeId);
+
+
+            SecurityTokenAddRequest newSecurityToken = new SecurityTokenAddRequest();
+            newSecurityToken.Guid = Guid.NewGuid();
+            newSecurityToken.UserEmail = employee.EmailAddress;
+            newSecurityToken.TenantId = employee.TenantId;
+            newSecurityToken.TokenTypeId = 2;
+            _securityTokenService.Post(newSecurityToken);
+
+            string path = HttpContext.Current.Server.MapPath("~/EmailTemplates/EmployeeSignUpEmail.html");
+            string html = File.ReadAllText(path);
+            string optioURL = ServiceConfig.BaseUrl;
+            html = html.Replace("[[URL-GOES-HERE]]", optioURL);
+            string endPoint = "/Employees/Register/";
+            html = html.Replace("[[END-POINT-GOES-HERE]]", endPoint);
+            //--replace guid
+            html = html.Replace("[[xxxxxxxxxxxxxxx]]", newSecurityToken.Guid.ToString());
+            //--call email service
+            EmailSendRequest confirmEmail = new EmailSendRequest();
+            confirmEmail.Destination = employee.EmailAddress;
+            confirmEmail.Subject = "Please Confirm Your Registration With Optio!";
+            confirmEmail.Body = html;
+            confirmEmail.From = "optio@mailinator.com";
+            await _notificationService.SendEmailAsync(confirmEmail);
+        }
+        
+         public void AssignAspUser(EmployeeSignUpAddRequest model)
+        {
+            DataProvider.ExecuteNonQuery(GetConnection, "dbo.Employees_AspUserUpdate"
+               , inputParamMapper: delegate (SqlParameterCollection pc)
+               {
+                   int? tenantId = UserService.GetCurrentTenantId();
+                   string userId = UserService.GetCurrentUserId();
+                   pc.AddWithValue("@TenantId", tenantId);
+                   pc.AddWithValue("@UserId", userId);
+                   pc.AddWithValue("@AspNetUserId", model.AspNetUserId);
+                   pc.AddWithValue("@EmailAddress", model.EmailAddress);
+
+               }, returnParameters: null
+               );
+        }
+
+        public void ConfirmEmployeeInvitation(EmployeeSignUpAddRequest employee)
+        {
+
+            IdentityUser newUser = UserService.CreateUser(employee.EmailAddress, employee.Password);
+            employee.AspNetUserId = newUser.Id;
+
+            AssignAspUser(employee);
+            SecurityToken confirmedSecurityToken = _securityTokenService.SelectByGuid(employee.Guid);
+
+            RoleAddRequest newRole = new RoleAddRequest();
+            newRole.RoleName = "user";
+            newRole.TenantId = confirmedSecurityToken.TenantId;
+            newRole.UserId = employee.AspNetUserId;
+
+            _roleService.GrantRoleToNewEmployee(newRole);
+
+            _securityTokenService.DeleteByGuidAndExpired(employee.Guid);
+
+
+        }
