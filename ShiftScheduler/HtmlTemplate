@@ -1,0 +1,222 @@
+<div class="row wrapper border-bottom white-bg page-heading" ng-cloak>
+    <div class="col-lg-10">
+        <h2>Shift Schedule</h2>
+        <ol class="breadcrumb">
+            <li>
+                <a href="http://optio.dev/">Home</a>
+            </li>
+            <li>
+                <a href="/accounts/index">Accounts</a>
+            </li>
+            <li class="active">
+                <strong>Shifts</strong>
+            </li>
+        </ol>
+    </div>
+    <br />
+    <button type="button" class="btn btn-w-m btn-default" ng-click="shiftVm.showFilterForm()" ng-cloak>Filter Shifts</button>
+    <button type="button" class="btn btn-w-m btn-primary" ng-hide="shiftVm.addForm" ng-click="shiftVm.showForm()" ng-cloak>Add New Shift</button>
+    <div class="col-lg-12">
+        <br />
+        <div class="row animate-if" ng-show="shiftVm.filterForm">
+            <div class="ibox-content">
+                <div class="form-group">
+                    <label class="col-sm-2 control-label">Filter by Employee</label>
+                    <select class="form-control" chosen multiple search-contains="true" max-shown-results="5" style="width: 220px;" tabindex="-1" ng-model="shiftVm.selectedEmployeeId"
+                            ng-change="shiftVm.filterShifts()" ng-options="employee.id as employee.firstName for employee in shiftVm.empItems">
+                        <option></option>
+                    </select>
+                </div>
+
+                <div class="form-group">
+                    <label class="col-sm-2 control-label">Filter by Account Position</label>
+                    <select class="form-control" chosen multiple search-contains="true" max-shown-results="5" style="width: 220px;" tabindex="-1" ng-model="shiftVm.selectedAccountPositionId"
+                            ng-change="shiftVm.filterShifts()" ng-options="accountPosition.id as accountPosition.code for accountPosition in shiftVm.apItems">
+                        <option value="noFilter">No Filter</option>
+                    </select>
+                </div>
+            </div>
+        </div>
+        <div class="row animate-if" ng-show="shiftVm.addForm">
+            <div class="ibox-content">
+                <form class="form-horizontal" id="shiftForm" name="shiftVm.shiftForm" style="text-align:left;" novalidate>
+                    <div class="form-group">
+                        <label class="col-sm-2 control-label">Start Date</label>
+                        <div class="col-sm-5">
+                            <input type="text" required ng-model="shiftVm.item.startDateLocal" ng-class="{'error':!shiftVm.shiftForm.startDateLocal.$valid}" class="form-control" placeholder="Please enter in YYYY-MM-DD HH:MM:SS format" name="startDateLocal" id="startDateLocal">
+
+
+                            <span class="error" data-ng-show="shiftVm.shiftErrors && shiftVm.shiftForm.startDateLocal.$error.required">Date/Time is required</span>
+                        </div>
+                    </div>
+
+                    <div class="form-group">
+                        <label class="col-sm-2 control-label">Shift Length</label>
+                        <div class="col-sm-5">
+                            <input type="number" required ng-max="24" ng-model="shiftVm.item.shiftLength" ng-class="{'error':!shiftVm.shiftForm.shiftLength.$valid}" class="form-control" placeholder="Please enter in hh.mm format" name="shiftLength" id="shiftLength">
+                            <span class="error" data-ng-show="shiftVm.shiftErrors && shiftVm.shiftForm.shiftLength.$error.required">Shift length is required</span>
+                            <span class="error" data-ng-show="shiftVm.shiftErrors && shiftVm.shiftForm.shiftLength.$error.max">Shift must be under 24 hours</span>
+                        </div>
+                    </div>
+                    <div class="form-group">
+                        <label class="col-sm-2 control-label">Account Position</label>
+                        <div class="col-sm-5">
+                            <select type="text" ng-options="accountPosition.id as accountPosition.code for accountPosition in shiftVm.apItems" ng-model="shiftVm.item.accountPositionId" class="form-control" placeholder="Please enter account position" name="accountPosition" id="accountPosition"></select>
+                        </div>
+                    </div>
+                    <div class="form-group">
+                        <label class="col-sm-2 control-label">Responsible Employee</label>
+                        <div class="col-sm-5">
+
+                            <select type="text" ng-options="employee.id as employee.firstName for employee in shiftVm.empItems" ng-model="shiftVm.item.employeeId" class="form-control" placeholder="Please enter responsible employee" name="employeeId" id="employeeId">
+                                <option value="">Unassign Employee</option>
+                            </select>
+                        </div>
+                    </div>
+                    <div class="form-group">
+                        <div class="col-sm-4 col-sm-offset-4">
+                            <button class="btn btn-default" ng-click="shiftVm.showForm()" type="button" id="cancelButton">Cancel</button>
+                            <button class="btn btn-primary" ng-click="shiftVm.insert()" type="button" id="saveButton">{{shiftVm.item.id != null ? 'Save Changes' : 'Save'}}</button>
+                            <button class="btn btn-danger" ng-show="shiftVm.item.id" ng-click="shiftVm.deleteConfirmationModal(shiftVm.item)" type="button" id="deleteButton">Delete</button>
+                        </div>
+                    </div>
+                    <div class="hr-line-dashed"></div>
+                </form>
+            </div>
+        </div>
+    </div>
+</div>
+
+<div class="wrapper wrapper-content">
+    <div class="row animated fadeInDown">
+        <div class="col-lg-3">
+            <div class="ibox float-e-margins">
+                <div class="ibox-title">
+                    <h5>Shift List</h5>
+                    <div class="ibox-tools">
+                        <label>Sort By: </label>
+                        <select ng-model="shiftVm.sortCriteria">
+                            <option value="employee.firstName">Employees</option>
+                            <option value="accountPosition.code">Account Position</option>
+                            <option value="startDateLocal">Start Date</option>
+                        </select>
+                        <a class="collapse-link">
+                            <i class="fa fa-chevron-up"></i>
+                        </a>
+                        <a class="dropdown-toggle" data-toggle="dropdown" href="#">
+                            <i class="fa fa-wrench"></i>
+                        </a>
+                        <ul class="dropdown-menu dropdown-user">
+                            <li>
+                                <a href="#">Config option 1</a>
+                            </li>
+                            <li>
+                                <a href="#">Config option 2</a>
+                            </li>
+                        </ul>
+                        <a class="close-link">
+                            <i class="fa fa-times"></i>
+                        </a>
+                    </div>
+                </div>
+                <div class="scroll_content" slimscroll="{height: '400px'}">
+                    <div class="ibox-content no-padding" ng-repeat="shift in shiftVm.shifts | orderBy: shiftVm.sortCriteria">
+
+                        <ul class="list-group">
+                            <li class="list-group-item">
+                                <div class="text">
+                                    <span class="startTime">{{shift.accountPosition.code || ""}}</span>
+                                    <span class="startTime">{{shift.startDateLocal | date:'short'}} {{shift.employee.firstName || ""}} {{shift.employee.lastName|| ""}}</span>
+                                    <small class="block text-muted"><i class="fa fa-clock-o"></i> Shift for {{shift.shiftLength}} hours</small>
+                                </div>
+                                <button class="btn btn-xs btn-primary" ng-click="shiftVm.showForm(shift)" type="button" id="editShift"><i class="fa fa-pencil"></i>Edit</button>
+                                <button class="btn btn-xs btn-danger" ng-click="shiftVm.deleteConfirmationModal(shift)" type="button" id="deleteShift"><i class="fa fa-trash"></i>Delete</button>
+
+                            </li>
+                        </ul>
+                    </div>
+                </div>
+            </div>
+            <div class="ibox float-e-margins">
+                <div class="ibox-title">
+                    <h5>Shift Pattern List</h5>
+                    <div class="ibox-tools">
+                        <a class="collapse-link">
+                            <i class="fa fa-chevron-up"></i>
+                        </a>
+                        <a class="dropdown-toggle" data-toggle="dropdown" href="#">
+                            <i class="fa fa-wrench"></i>
+                        </a>
+                        <ul class="dropdown-menu dropdown-user">
+                            <li>
+                                <a href="#">Config option 1</a>
+                            </li>
+                            <li>
+                                <a href="#">Config option 2</a>
+                            </li>
+                        </ul>
+                        <a class="close-link">
+                            <i class="fa fa-times"></i>
+                        </a>
+                    </div>
+                </div>
+                <div class="scroll_content" slimscroll="{height: '400px'}">
+                    <div class="ibox-content no-padding" ng-repeat="shiftPattern in shiftVm.spItems">
+
+                        <ul class="list-group">
+                            <li class="list-group-item">
+                                <div class="text">
+                                    <span class="label ng-class:{'label-primary': shiftPattern.isSunday}">SUN</span>
+                                    <span class="label ng-class:{'label-primary': shiftPattern.isMonday}">MON</span>
+                                    <span class="label ng-class:{'label-primary': shiftPattern.isTuesday}">TUE</span>
+                                    <span class="label ng-class:{'label-primary': shiftPattern.isWednesday}">WED</span>
+                                    <span class="label ng-class:{'label-primary': shiftPattern.isThursday}">THU</span>
+                                    <span class="label ng-class:{'label-primary': shiftPattern.isFriday}">FRI</span>
+                                    <span class="label ng-class:{'label-primary': shiftPattern.isSaturday}">SAT</span>
+                                </div>
+                                <br />
+                                <div class="text">
+                                    <span class="startTime">{{shiftPattern.startTime | limitTo:5}} - {{shiftPattern.endTime}}</span>
+                                    <small class="block text-muted"><i class="fa fa-clock-o"></i> Shift for {{shiftPattern.hours}} hours</small>
+                                    <a class="btn btn-xs btn-white" style="float:right;" ng-click="shiftVm.addShiftPattern(shiftPattern)"><i class="fa fa-pencil"> </i>Add Shift Pattern</a>
+                                </div>
+                            </li>
+                        </ul>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+
+
+        <div class="col-lg-9">
+            <div class="ibox float-e-margins">
+                <div class="ibox-title">
+                    <h5>Schedule Table</h5>
+                    <div class="ibox-tools">
+                        <a class="collapse-link">
+                            <i class="fa fa-chevron-up"></i>
+                        </a>
+                        <a class="dropdown-toggle" data-toggle="dropdown" href="#">
+                            <i class="fa fa-wrench"></i>
+                        </a>
+                        <ul class="dropdown-menu dropdown-user">
+                            <li>
+                                <a href="#">Config option 1</a>
+                            </li>
+                            <li>
+                                <a href="#">Config option 2</a>
+                            </li>
+                        </ul>
+                        <a class="close-link">
+                            <i class="fa fa-times"></i>
+                        </a>
+                    </div>
+                </div>
+                <div class="ibox-content">
+                    <div ui-calendar="shiftVm.uiConfig.calendar" calendar="shiftCalendar" id="calendar" class="calendar" ng-model="shiftVm.eventSources"></div>
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
